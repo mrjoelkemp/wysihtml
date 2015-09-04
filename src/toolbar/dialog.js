@@ -69,27 +69,17 @@
           callbackWrapper(event);
         }
         if (keyCode === wysihtml5.ESCAPE_KEY) {
-          that.fire("cancel");
-          that.hide();
+          that.cancel();
         }
       });
 
       dom.delegate(this.container, "[data-wysihtml5-dialog-action=save]", "click", callbackWrapper);
 
       dom.delegate(this.container, "[data-wysihtml5-dialog-action=cancel]", "click", function(event) {
-        that.fire("cancel");
-        that.hide();
+        that.cancel();
         event.preventDefault();
         event.stopPropagation();
       });
-
-      var formElements  = this.container.querySelectorAll(SELECTOR_FORM_ELEMENTS),
-          i             = 0,
-          length        = formElements.length,
-          _clearInterval = function() { clearInterval(that.interval); };
-      for (; i<length; i++) {
-        dom.observe(formElements[i], "change", _clearInterval);
-      }
 
       this._observed = true;
     },
@@ -156,25 +146,25 @@
       }
     },
 
+    update: function (elementToChange) {
+      this.elementToChange = elementToChange ? elementToChange : this.elementToChange;
+      this._interpolate();
+    },
+
     /**
      * Show the dialog element
      */
     show: function(elementToChange) {
-      if (dom.hasClass(this.link, CLASS_NAME_OPENED)) {
-        return;
-      }
+      var firstField  = this.container.querySelector(SELECTOR_FORM_ELEMENTS);
 
-      var that        = this,
-          firstField  = this.container.querySelector(SELECTOR_FORM_ELEMENTS);
-      this.elementToChange = elementToChange;
       this._observe();
-      this._interpolate();
-      if (elementToChange) {
-        this.interval = setInterval(function() { that._interpolate(true); }, 500);
-      }
+      this.update(elementToChange);
+
       dom.addClass(this.link, CLASS_NAME_OPENED);
       this.container.style.display = "";
+      this.isOpen = true;
       this.fire("show");
+
       if (firstField && !elementToChange) {
         try {
           firstField.focus();
@@ -185,12 +175,21 @@
     /**
      * Hide the dialog element
      */
-    hide: function() {
-      clearInterval(this.interval);
+    _hide: function(focus) {
       this.elementToChange = null;
       dom.removeClass(this.link, CLASS_NAME_OPENED);
       this.container.style.display = "none";
+      this.isOpen = false;
+    },
+
+    hide: function() {
+      this._hide();
+      this.fire("hide");
+    },
+
+    cancel: function() {
+      this._hide();
       this.fire("cancel");
     }
   });
-})(wysihtml5);
+})(wysihtml5); //jshint ignore:line

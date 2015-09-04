@@ -70,14 +70,14 @@
   // Deletion with caret in the beginning of headings needs special attention
   // Heading does not concate text to previous block node correctly (browsers do unexpected miracles here especially webkit)
   var fixDeleteInTheBeginnigOfHeading = function(composer) {
-    var selection = composer.selection;
+    var selection = composer.selection,
+        prevNode = selection.getPreviousNode();
 
     if (selection.caretIsFirstInSelection() &&
-        selection.getPreviousNode() &&
-        selection.getPreviousNode().nodeName &&
-        (/^H\d$/gi).test(selection.getPreviousNode().nodeName)
+        prevNode &&
+        prevNode.nodeType === 1 &&
+        (/block/).test(composer.win.getComputedStyle(prevNode).display)
     ) {
-      var prevNode = selection.getPreviousNode();
       if ((/^\s*$/).test(prevNode.textContent || prevNode.innerText)) {
         // If heading is empty remove the heading node
         prevNode.parentNode.removeChild(prevNode);
@@ -85,20 +85,23 @@
       } else {
         if (prevNode.lastChild) {
           var selNode = prevNode.lastChild,
-              curNode = wysihtml5.dom.getParentElement(selection.getSelectedNode(), { query: "h1, h2, h3, h4, h5, h6, p, pre, div, blockquote" }, false, composer.element);
-          if (prevNode) {
+              selectedNode = selection.getSelectedNode(),
+              commonAncestorNode = wysihtml5.dom.domNode(prevNode).commonAncestor(selectedNode, composer.element);
+              curNode = commonAncestorNode ? wysihtml5.dom.getParentElement(selectedNode, {
+                query: "h1, h2, h3, h4, h5, h6, p, pre, div, blockquote"
+              }, false, commonAncestorNode) : null;
+          
             if (curNode) {
               while (curNode.firstChild) {
                 prevNode.appendChild(curNode.firstChild);
               }
               selection.setAfter(selNode);
               return true;
-            } else if (selection.getSelectedNode().nodeType === 3) {
-              prevNode.appendChild(selection.getSelectedNode());
+            } else if (selectedNode.nodeType === 3) {
+              prevNode.appendChild(selectedNode);
               selection.setAfter(selNode);
               return true;
             }
-          }
         }
       }
     }
@@ -110,23 +113,17 @@
         element = composer.element;
 
     if (selection.isCollapsed()) {
-      if (selection.caretIsInTheBeginnig('li')) {
-        // delete in the beginnig of LI will outdent not delete
+      if (fixDeleteInTheBeginnigOfHeading(composer)) {
         event.preventDefault();
-        composer.commands.exec('outdentList');
-      } else {
-        if (fixDeleteInTheBeginnigOfHeading(composer)) {
-          event.preventDefault();
-          return;
-        }
-        if (fixLastBrDeletionInTable(composer)) {
-          event.preventDefault();
-          return;
-        }
-        if (handleUneditableDeletion(composer)) {
-          event.preventDefault();
-          return;
-        }
+        return;
+      }
+      if (fixLastBrDeletionInTable(composer)) {
+        event.preventDefault();
+        return;
+      }
+      if (handleUneditableDeletion(composer)) {
+        event.preventDefault();
+        return;
       }
     } else {
       if (selection.containsUneditable()) {
@@ -136,11 +133,15 @@
     }
   };
 
-  var handleTabKeyDown = function(composer, element) {
+  var handleTabKeyDown = function(composer, element, shiftKey) {
     if (!composer.selection.isCollapsed()) {
       composer.selection.deleteContents();
     } else if (composer.selection.caretIsInTheBeginnig('li')) {
-      if (composer.commands.exec('indentList')) return;
+      if (shiftKey) {
+        if (composer.commands.exec('outdentList')) return;
+      } else {
+        if (composer.commands.exec('indentList')) return;
+      }
     }
 
     // Is &emsp; close enough to tab. Could not find enough counter arguments for now.
@@ -156,9 +157,9 @@
 
   // Listens to "drop", "paste", "mouseup", "focus", "keyup" events and fires
   var handleUserInteraction = function (event) {
-    this.parent.fire("beforeinteraction").fire("beforeinteraction:composer");
+    this.parent.fire("beforeinteraction", event).fire("beforeinteraction:composer", event);
     setTimeout((function() {
-      this.parent.fire("interaction").fire("interaction:composer");
+      this.parent.fire("interaction", event).fire("interaction:composer", event);
     }).bind(this), 0);
   };
 
@@ -272,6 +273,13 @@
         command = shortcuts[keyCode],
         target, parent;
 
+    // Select all (meta/ctrl + a)
+    if ((event.ctrlKey || event.metaKey) && keyCode === 65) {
+      this.selection.selectAll();
+      event.preventDefault();
+      return;
+    }
+
     // Shortcut logic
     if ((event.ctrlKey || event.metaKey) && !event.altKey && command) {
       this.commands.exec(command);
@@ -294,16 +302,16 @@
         if (parent.nodeName === "A" && !parent.firstChild) {
           parent.parentNode.removeChild(parent);
         }
-        setTimeout(function() {
+        setTimeout((function() {
           wysihtml5.quirks.redraw(this.element);
-        }, 0);
+        }).bind(this), 0);
       }
     }
 
     if (this.config.handleTabKey && keyCode === wysihtml5.TAB_KEY) {
       // TAB key handling
       event.preventDefault();
-      handleTabKeyDown(this, this.element);
+      handleTabKeyDown(this, this.element, event.shiftKey);
     }
 
   };

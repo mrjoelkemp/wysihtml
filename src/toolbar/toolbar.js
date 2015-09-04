@@ -90,8 +90,7 @@
     _getDialog: function(link, command) {
       var that          = this,
           dialogElement = this.container.querySelector("[data-wysihtml5-dialog='" + command + "']"),
-          dialog,
-          caretBookmark;
+          dialog, caretBookmark;
 
       if (dialogElement) {
         if (wysihtml5.toolbar["Dialog_" + command]) {
@@ -102,7 +101,6 @@
 
         dialog.on("show", function() {
           caretBookmark = that.composer.selection.getBookmark();
-
           that.editor.fire("show:dialog", { command: command, dialogContainer: dialogElement, commandLink: link });
         });
 
@@ -111,14 +109,27 @@
             that.composer.selection.setBookmark(caretBookmark);
           }
           that._execCommand(command, attributes);
-
           that.editor.fire("save:dialog", { command: command, dialogContainer: dialogElement, commandLink: link });
+          that._hideAllDialogs();
+          that._preventInstantFocus();
+          caretBookmark = undefined;
+
         });
 
         dialog.on("cancel", function() {
-          that.editor.focus(false);
+          if (caretBookmark) {
+            that.composer.selection.setBookmark(caretBookmark);
+          }
           that.editor.fire("cancel:dialog", { command: command, dialogContainer: dialogElement, commandLink: link });
+          caretBookmark = undefined;
+          that._preventInstantFocus();
         });
+
+        dialog.on("hide", function() {
+          that.editor.fire("hide:dialog", { command: command, dialogContainer: dialogElement, commandLink: link });
+          caretBookmark = undefined;
+        });
+
       }
       return dialog;
     },
@@ -134,14 +145,7 @@
         return;
       }
 
-      var commandObj = this.commandMapping[command + ":" + commandValue];
-
-      // Show dialog when available
-      if (commandObj && commandObj.dialog && !commandObj.state) {
-        commandObj.dialog.show();
-      } else {
-        this._execCommand(command, commandValue);
-      }
+      this._execCommand(command, commandValue);
     },
 
     _execCommand: function(command, commandValue) {
@@ -191,10 +195,19 @@
       dom.delegate(container, "[data-wysihtml5-command], [data-wysihtml5-action]", "mousedown", function(event) { event.preventDefault(); });
 
       dom.delegate(container, "[data-wysihtml5-command]", "click", function(event) {
-        var link          = this,
+        var state,
+            link          = this,
             command       = link.getAttribute("data-wysihtml5-command"),
-            commandValue  = link.getAttribute("data-wysihtml5-command-value");
-        that.execCommand(command, commandValue);
+            commandValue  = link.getAttribute("data-wysihtml5-command-value"),
+            commandObj = that.commandMapping[command + ":" + commandValue];
+
+        if (commandValue || !commandObj.dialog) {
+          that.execCommand(command, commandValue);
+        } else {
+          state = getCommandState(that.composer, commandObj);
+          commandObj.dialog.show(state);
+        }
+
         event.preventDefault();
       });
 
@@ -204,21 +217,29 @@
         event.preventDefault();
       });
 
-      editor.on("interaction:composer", function() {
+      editor.on("interaction:composer", function(event) {
+        if (!that.preventFocus) {
           that._updateLinkStates();
+        }
       });
 
-      editor.on("focus:composer", function() {
-        that.bookmark = null;
-      });
+      this._ownerDocumentClick = function(event) {
+        if (!wysihtml5.dom.contains(that.container, event.target) && !wysihtml5.dom.contains(that.composer.element, event.target)) {
+          that._updateLinkStates();
+          that._preventInstantFocus();
+        }
+      };
+
+      this.container.ownerDocument.addEventListener("click", this._ownerDocumentClick, false);
+      this.editor.on("destroy:composer", this.destroy.bind(this));
 
       if (this.editor.config.handleTables) {
-          editor.on("tableselect:composer", function() {
-              that.container.querySelectorAll('[data-wysihtml5-hiddentools="table"]')[0].style.display = "";
-          });
-          editor.on("tableunselect:composer", function() {
-              that.container.querySelectorAll('[data-wysihtml5-hiddentools="table"]')[0].style.display = "none";
-          });
+        editor.on("tableselect:composer", function() {
+            that.container.querySelectorAll('[data-wysihtml5-hiddentools="table"]')[0].style.display = "";
+        });
+        editor.on("tableunselect:composer", function() {
+            that.container.querySelectorAll('[data-wysihtml5-hiddentools="table"]')[0].style.display = "none";
+        });
       }
 
       editor.on("change_view", function(currentView) {
@@ -235,15 +256,32 @@
       });
     },
 
+    destroy: function() {
+      this.container.ownerDocument.removeEventListener("click", this._ownerDocumentClick, false);
+    },
+
+    _hideAllDialogs: function() {
+      var commandMapping      = this.commandMapping;
+      for (var i in commandMapping) {
+        if (commandMapping[i].dialog) {
+          commandMapping[i].dialog.hide();
+        }
+      }
+    },
+
+    _preventInstantFocus: function() {
+      this.preventFocus = true;
+      setTimeout(function() {
+        this.preventFocus = false;
+      }.bind(this),0);
+    },
+
     _updateLinkStates: function() {
 
-      var commandMapping      = this.commandMapping,
-          commandblankMapping = this.commandblankMapping,
-          actionMapping       = this.actionMapping,
-          i,
-          state,
-          action,
-          command;
+      var i, state, action, command, displayDialogAttributeValue,
+          commandMapping      = this.commandMapping,
+          composer            = this.composer,
+          actionMapping       = this.actionMapping;
       // every millisecond counts... this is executed quite often
       for (i in commandMapping) {
         command = commandMapping[i];
@@ -276,18 +314,21 @@
             if (command.group) {
               dom.addClass(command.group, CLASS_NAME_COMMAND_ACTIVE);
             }
-            if (command.dialog) {
-              if (typeof(state) === "object" || wysihtml5.lang.object(state).isArray()) {
+            // commands with fixed value can not have a dialog.
+            if (command.dialog && (typeof command.value === "undefined" || command.value === null)) {
+              if (state && typeof state === "object") {
+                state = getCommandState(composer, command);
+                command.state = state;
 
-                if (!command.dialog.multiselect && wysihtml5.lang.object(state).isArray()) {
-                  // Grab first and only object/element in state array, otherwise convert state into boolean
-                  // to avoid showing a dialog for multiple selected elements which may have different attributes
-                  // eg. when two links with different href are selected, the state will be an array consisting of both link elements
-                  // but the dialog interface can only update one
-                  state = state.length === 1 ? state[0] : true;
-                  command.state = state;
+                // If dialog has dataset.showdialogonselection set as true,
+                // Dialog displays on text state becoming active regardless of clobal showToolbarDialogsOnSelection options value
+                displayDialogAttributeValue = command.dialog.container.dataset ? command.dialog.container.dataset.showdialogonselection : false;
+
+                if (composer.config.showToolbarDialogsOnSelection || displayDialogAttributeValue) {
+                  command.dialog.show(state);
+                } else {
+                  command.dialog.update(state);
                 }
-                command.dialog.show(state);
               } else {
                 command.dialog.hide();
               }
@@ -301,7 +342,8 @@
             if (command.group) {
               dom.removeClass(command.group, CLASS_NAME_COMMAND_ACTIVE);
             }
-            if (command.dialog) {
+            // commands with fixed value can not have a dialog.
+            if (command.dialog && !command.value) {
               command.dialog.hide();
             }
           }
@@ -330,5 +372,19 @@
       this.container.style.display = "none";
     }
   });
+
+  function getCommandState (composer, command) {
+    var state = composer.commands.state(command.name, command.value);
+
+    // Grab first and only object/element in state array, otherwise convert state into boolean
+    // to avoid showing a dialog for multiple selected elements which may have different attributes
+    // eg. when two links with different href are selected, the state will be an array consisting of both link elements
+    // but the dialog interface can only update one
+    if (!command.dialog.multiselect && wysihtml5.lang.object(state).isArray()) {
+      state = state.length === 1 ? state[0] : true;
+    }
+
+    return state;
+  }
 
 })(wysihtml5);

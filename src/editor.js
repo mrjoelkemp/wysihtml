@@ -42,6 +42,8 @@
     // Whether toolbar is displayed after init by script automatically.
     // Can be set to false if toolobar is set to display only on editable area focus
     showToolbarAfterInit: true,
+    // With default toolbar it shows dialogs in toolbar when their related text format state becomes active (click on link in text opens link dialogue)
+    showToolbarDialogsOnSelection: true,
     // Whether urls, entered by the user should automatically become clickable-links
     autoLink:             true,
     // Includes table editing events and cell selection tracking
@@ -195,6 +197,16 @@
       return this.currentView.hasPlaceholderSet();
     },
 
+    destroy: function() {
+      if (this.composer && this.composer.sandbox) {
+        this.composer.sandbox.destroy();
+      }
+      if (this.toolbar) {
+        this.toolbar.destroy();
+      }
+      this.off();
+    },
+
     parse: function(htmlOrElement, clearInternals) {
       var parseContext = (this.config.contentEditableMode) ? document : ((this.composer) ? this.composer.sandbox.getDocument() : null);
       var returnValue = this.config.parser(htmlOrElement, {
@@ -215,8 +227,7 @@
      *  - Observes for paste and drop
      */
     _initParser: function() {
-      var oldHtml,
-          cleanHtml;
+      var oldHtml;
 
       if (wysihtml5.browser.supportsModernPaste()) {
         this.on("paste:composer", function(event) {

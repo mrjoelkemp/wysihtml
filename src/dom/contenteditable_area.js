@@ -26,6 +26,10 @@
         }
       },
 
+      destroy: function() {
+
+      },
+
       // creates a new contenteditable and initiates it
       _createElement: function() {
         var element = doc.createElement("div");
@@ -36,7 +40,7 @@
 
       // initiates an allready existent contenteditable
       _bindElement: function(contentEditable) {
-        contentEditable.className = (contentEditable.className && contentEditable.className !== '') ? contentEditable.className + " wysihtml5-sandbox" : "wysihtml5-sandbox";
+        contentEditable.className = contentEditable.className ? contentEditable.className + " wysihtml5-sandbox" : "wysihtml5-sandbox";
         this._loadElement(contentEditable, true);
         return contentEditable;
       },

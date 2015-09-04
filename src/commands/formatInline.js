@@ -137,9 +137,7 @@
   }
 
   function updateFormatOfElement(element, options) {
-    var attr, newNode, a, newAttributes, nodeNameQuery;
-
-    
+    var attr, newNode, a, newAttributes, nodeNameQuery, nodeQueryMatch;
 
     if (options.className) {
       if (options.toggle !== false && element.classList.contains(options.className)) {
@@ -174,30 +172,19 @@
       updateElementAttributes(element, newAttributes, options.toggle);
     }
 
-    // Handle similar semanticallys ame elements (queryAliasMap)
+
+    // Handle similar semantically same elements (queryAliasMap)
     nodeNameQuery = options.nodeName ? queryAliasMap[options.nodeName.toLowerCase()] || options.nodeName.toLowerCase() : null;
+    nodeQueryMatch = nodeNameQuery ? wysihtml5.dom.domNode(element).test({ query: nodeNameQuery }) : false;
     
-    if ((options.nodeName && wysihtml5.dom.domNode(element).test({ query: nodeNameQuery })) || (!options.nodeName && element.nodeName === defaultTag)) {
-
-      
-      if (hasNoClass(element) && hasNoStyle(element) && hasNoAttributes(element)) {
+    // Unwrap element if no attributes present and node name given
+    // or no attributes and if no nodename set but node is the default
+    if (!options.nodeName || options.nodeName === defaultTag || nodeQueryMatch) {
+      if (
+        ((options.toggle !== false && nodeQueryMatch) || (!options.nodeName && element.nodeName === defaultTag)) &&
+        hasNoClass(element) && hasNoStyle(element) && hasNoAttributes(element)
+      ) {
         wysihtml5.dom.unwrap(element);
-      } else if (!options.nodeName) {
-        newNode = element.ownerDocument.createElement(defaultTag);
-        
-        // pass present attributes
-        attr = wysihtml5.dom.getAttributes(element);
-        for (a in attr) {
-          if (attr.hasOwnProperty(a)) {
-            newNode.setAttribute(a, attr[a]);
-          }
-        }
-
-        while (element.firstChild) {
-          newNode.appendChild(element.firstChild);
-        }
-        element.parentNode.insertBefore(newNode, element);
-        element.parentNode.removeChild(element);
       }
 
     }
@@ -302,35 +289,39 @@
         partial = false,
         node, range, caretNode;
 
-    if (searchNodes.length === 0 && composer.selection.isCollapsed()) {
-      caretNode = composer.selection.getSelection().anchorNode;
-      if (!caretNode) {
-        // selection not in editor
-        return {
-            nodes: [],
-            partial: false
-        };
-      }
-      if (caretNode.nodeType === 3) {
-        searchNodes = [caretNode];
-      }
-    }
+    if (composer.selection.isInThisEditable()) {
 
-    // Handle collapsed selection caret
-    if (!searchNodes.length) {
-      range = composer.selection.getOwnRanges()[0];
-      if (range) {
-        searchNodes = [range.endContainer];
+      if (searchNodes.length === 0 && composer.selection.isCollapsed()) {
+        caretNode = composer.selection.getSelection().anchorNode;
+        if (!caretNode) {
+          // selection not in editor
+          return {
+              nodes: [],
+              partial: false
+          };
+        }
+        if (caretNode.nodeType === 3) {
+          searchNodes = [caretNode];
+        }
       }
-    }
 
-    for (var i = 0, maxi = searchNodes.length; i < maxi; i++) {
-      node = findSimilarTextNodeWrapper(searchNodes[i], options, composer.element, exact);
-      if (node) {
-        nodes.push(node);
-      } else {
-        partial = true;
+      // Handle collapsed selection caret
+      if (!searchNodes.length) {
+        range = composer.selection.getOwnRanges()[0];
+        if (range) {
+          searchNodes = [range.endContainer];
+        }
       }
+
+      for (var i = 0, maxi = searchNodes.length; i < maxi; i++) {
+        node = findSimilarTextNodeWrapper(searchNodes[i], options, composer.element, exact);
+        if (node) {
+          nodes.push(node);
+        } else {
+          partial = true;
+        }
+      }
+
     }
     
     return {
@@ -651,9 +642,7 @@
 
     state: function(composer, command, options) {
       options = fixOptions(options);
-
       var nodes = getState(composer, options, true).nodes;
-      
       return (nodes.length === 0) ? false : nodes;
     }
   };

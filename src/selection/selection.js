@@ -30,6 +30,50 @@
       return ret;
   }
 
+  function getWebkitSelectionFixNode(container) {
+    var blankNode = document.createElement('span');
+
+    var placeholderRemover = function(event) {
+      // Self-destructs the caret and keeps the text inserted into it by user
+      var lastChild;
+
+      container.removeEventListener('mouseup', placeholderRemover);
+      container.removeEventListener('keydown', placeholderRemover);
+      container.removeEventListener('touchstart', placeholderRemover);
+      container.removeEventListener('focus', placeholderRemover);
+      container.removeEventListener('blur', placeholderRemover);
+      container.removeEventListener('paste', delayedPlaceholderRemover);
+      container.removeEventListener('drop', delayedPlaceholderRemover);
+      container.removeEventListener('beforepaste', delayedPlaceholderRemover);
+
+      if (blankNode && blankNode.parentNode) {
+        blankNode.parentNode.removeChild(blankNode);
+      }
+    },
+    delayedPlaceholderRemover = function (event) {
+      if (blankNode && blankNode.parentNode) {
+        setTimeout(placeholderRemover, 0);
+      }
+    };
+
+    blankNode.appendChild(document.createTextNode(wysihtml5.INVISIBLE_SPACE));
+    blankNode.className = '_wysihtml5-temp-caret-fix';
+    blankNode.style.display = 'block';
+    blankNode.style.minWidth = '1px';
+    blankNode.style.height = '0px';
+
+    container.addEventListener('mouseup', placeholderRemover);
+    container.addEventListener('keydown', placeholderRemover);
+    container.addEventListener('touchstart', placeholderRemover);
+    container.addEventListener('focus', placeholderRemover);
+    container.addEventListener('blur', placeholderRemover);
+    container.addEventListener('paste', delayedPlaceholderRemover);
+    container.addEventListener('drop', delayedPlaceholderRemover);
+    container.addEventListener('beforepaste', delayedPlaceholderRemover);
+
+    return blankNode;
+  }
+
   // Should fix the obtained ranges that cannot surrond contents normally to apply changes upon
   // Being considerate to firefox that sets range start start out of span and end inside on doubleclick initiated selection
   function expandRangeToSurround(range) {
@@ -702,6 +746,20 @@
       }
     },
 
+    canAppendChild: function (node) {
+      var anchorNode, anchorNodeTagNameLower,
+          voidElements = ["area", "base", "br", "col", "command", "embed", "hr", "img", "input", "keygen", "link", "meta", "param", "source", "track", "wbr"],
+          range = this.getRange();
+
+      anchorNode = node || range.startContainer;
+
+      if (anchorNode) {
+        anchorNodeTagNameLower = (anchorNode.tagName || anchorNode.nodeName).toLowerCase();
+      }
+
+      return voidElements.indexOf(anchorNodeTagNameLower) === -1;
+    },
+
     splitElementAtCaret: function (element, insertNode) {
       var sel = this.getSelection(),
           range, contentAfterRangeStart,
@@ -1082,6 +1140,52 @@
       return (selection && selection.anchorNode && selection.focusNode) ? selection : null;
     },
 
+
+
+    // Webkit has an ancient error of not selecting all contents when uneditable block element is first or last in editable area
+    selectAll: function() {
+      var range = this.createRange(),
+          composer = this.composer,
+          that = this,
+          blankEndNode = getWebkitSelectionFixNode(this.composer.element),
+          blankStartNode = getWebkitSelectionFixNode(this.composer.element),
+          s;
+
+      var doSelect = function() {
+        range.setStart(composer.element, 0);
+        range.setEnd(composer.element, composer.element.childNodes.length);
+        s = that.setSelection(range);
+      };
+
+      var notSelected = function() {
+        return !s || (s.nativeSelection && s.nativeSelection.type && (s.nativeSelection.type === "Caret" || s.nativeSelection.type === "None"));
+      }
+
+      wysihtml5.dom.removeInvisibleSpaces(this.composer.element);
+      doSelect();
+      
+      if (this.composer.element.firstChild && notSelected())  {
+        // Try fixing end
+        this.composer.element.appendChild(blankEndNode);
+        doSelect();
+
+        if (notSelected()) {
+          // Remove end fix
+          blankEndNode.parentNode.removeChild(blankEndNode);
+          
+          // Try fixing beginning
+          this.composer.element.insertBefore(blankStartNode, this.composer.element.firstChild);
+          doSelect();
+          
+          if (notSelected()) {
+            // Try fixing both
+            this.composer.element.appendChild(blankEndNode);
+            doSelect();
+          }
+        }
+      }
+    },
+
     createRange: function() {
       return rangy.createRange(this.doc);
     },
@@ -1138,6 +1242,25 @@
         }
 
         return (wysihtml5.lang.array(nodeNames).contains(parentElement.nodeName)) ? parentElement : false;
+    },
+
+    isInThisEditable: function() {
+      var sel = this.getSelection(),
+          fnode = sel.focusNode,
+          anode = sel.anchorNode;
+
+      // In IE node contains will not work for textnodes, thus taking parentNode
+      if (fnode && fnode.nodeType !== 1) {
+        fnode = fnode.parentNode;
+      }
+
+      if (anode && anode.nodeType !== 1) {
+        anode = anode.parentNode;
+      }
+
+      return anode && fnode &&
+             (wysihtml5.dom.contains(this.composer.element, fnode) || this.composer.element === fnode) &&
+             (wysihtml5.dom.contains(this.composer.element, anode) || this.composer.element === anode);
     },
 
     deselect: function() {
